@@ -119,7 +119,7 @@ module PgSync
           with_connection(to_uri, timeout: 3) do |conn|
             tables.keys.each do |table|
               unless table_exists?(conn, table, to_schema)
-                abort "Table does not exist in destination: #{table}"
+                abort "Table does not exist in destination: #{to_schema}.#{table}"
               end
             end
           end
@@ -157,8 +157,8 @@ module PgSync
               extra_fields = to_fields - from_fields
               missing_fields = from_fields - to_fields
 
-              from_sequences = sequences(from_connection, table, shared_fields)
-              to_sequences = sequences(to_connection, table, shared_fields)
+              from_sequences = sequences(from_connection, table, shared_fields, from_schema)
+              to_sequences = sequences(to_connection, table, shared_fields, to_schema)
               shared_sequences = to_sequences & from_sequences
               extra_sequences = to_sequences - from_sequences
               missing_sequences = from_sequences - to_sequences
@@ -166,7 +166,7 @@ module PgSync
               sql_clause = String.new
 
               @mutex.synchronize do
-                log "* Syncing #{table}"
+                log "* Syncing #{from_schema}.#{table}"
                 if opts[:sql]
                   log "    #{opts[:sql]}"
                   sql_clause << " #{opts[:sql]}"
@@ -190,7 +190,7 @@ module PgSync
                   seq_values[seq] = from_connection.exec("select last_value from #{seq}").to_a[0]["last_value"]
                 end
 
-                copy_to_command = "COPY (SELECT #{copy_fields} FROM #{table}#{sql_clause}) TO STDOUT"
+                copy_to_command = "COPY (SELECT #{copy_fields} FROM #{from_schema}.#{table}#{sql_clause}) TO STDOUT"
                 if opts[:in_batches]
                   primary_key = self.primary_key(from_connection, table, from_schema)
                   abort "No primary key" unless primary_key
@@ -216,8 +216,8 @@ module PgSync
                     # TODO be smarter for advance sql clauses
                     batch_sql_clause = " #{sql_clause.length > 0 ? "#{sql_clause} AND" : "WHERE"} #{where}"
 
-                    batch_copy_to_command = "COPY (SELECT #{copy_fields} FROM #{table}#{batch_sql_clause}) TO STDOUT"
-                    to_connection.copy_data "COPY #{table} (#{fields}) FROM STDIN" do
+                    batch_copy_to_command = "COPY (SELECT #{copy_fields} FROM #{from_schema}.#{table}#{batch_sql_clause}) TO STDOUT"
+                    to_connection.copy_data "COPY #{to_schema}.#{table} (#{fields}) FROM STDIN" do
                       from_connection.copy_data batch_copy_to_command do
                         while row = from_connection.get_copy_data
                           to_connection.put_copy_data(row)
@@ -248,10 +248,10 @@ module PgSync
 
                     to_connection.transaction do
                       # create a temp table
-                      to_connection.exec("CREATE TABLE #{temp_table} AS SELECT * FROM #{table} WITH NO DATA")
+                      to_connection.exec("CREATE TABLE #{to_schema}.#{temp_table} AS SELECT * FROM #{to_schema}.#{table} WITH NO DATA")
 
                       # load file
-                      to_connection.copy_data "COPY #{temp_table} (#{fields}) FROM STDIN" do
+                      to_connection.copy_data "COPY #{to_schema}.#{temp_table} (#{fields}) FROM STDIN" do
                         file.each do |row|
                           to_connection.put_copy_data(row)
                         end
@@ -259,22 +259,22 @@ module PgSync
 
                       if opts[:preserve]
                         # insert into
-                        to_connection.exec("INSERT INTO #{table} (SELECT * FROM #{temp_table} WHERE NOT EXISTS (SELECT 1 FROM #{table} WHERE #{table}.#{primary_key} = #{temp_table}.#{primary_key}))")
+                        to_connection.exec("INSERT INTO #{to_schema}.#{table} (SELECT * FROM #{to_schema}.#{temp_table} WHERE NOT EXISTS (SELECT 1 FROM #{to_schema}.#{table} WHERE #{to_schema}.#{table}.#{primary_key} = #{to_schema}.#{temp_table}.#{primary_key}))")
                       else
-                        to_connection.exec("DELETE FROM #{table} WHERE #{primary_key} IN (SELECT #{primary_key} FROM #{temp_table})")
-                        to_connection.exec("INSERT INTO #{table} (SELECT * FROM #{temp_table})")
+                        to_connection.exec("DELETE FROM #{to_schema}.#{table} WHERE #{primary_key} IN (SELECT #{primary_key} FROM #{to_schema}.#{temp_table})")
+                        to_connection.exec("INSERT INTO #{to_schema}.#{table} (SELECT * FROM #{to_schema}.#{temp_table})")
                       end
 
                       # delete temp table
-                      to_connection.exec("DROP TABLE #{temp_table}")
+                      to_connection.exec("DROP TABLE #{to_schema}.#{temp_table}")
                     end
                   ensure
                      file.close
                      file.unlink
                   end
                 else
-                  to_connection.exec("TRUNCATE #{table} CASCADE")
-                  to_connection.copy_data "COPY #{table} (#{fields}) FROM STDIN" do
+                  to_connection.exec("TRUNCATE #{to_schema}.#{table} CASCADE")
+                  to_connection.copy_data "COPY #{to_schema}.#{table} (#{fields}) FROM STDIN" do
                     from_connection.copy_data copy_to_command do
                       while row = from_connection.get_copy_data
                         to_connection.put_copy_data(row)
@@ -291,7 +291,7 @@ module PgSync
         end
 
       @mutex.synchronize do
-        log "* DONE #{table} (#{time.round(1)}s)"
+        log "* DONE #{from_schema}.#{table} (#{time.round(1)}s)"
       end
     end
 
@@ -562,8 +562,8 @@ Options:}
       $stderr.puts message
     end
 
-    def sequences(conn, table, columns)
-      conn.exec("SELECT #{columns.map { |f| "pg_get_serial_sequence(#{escape(table)}, #{escape(f)}) AS #{f}" }.join(", ")}").to_a[0].values.compact
+    def sequences(conn, table, columns, schema)
+      conn.exec("SELECT #{columns.map { |f| "pg_get_serial_sequence(#{escape(schema + "." + table)}, #{escape(f)}) AS #{f}" }.join(", ")}").to_a[0].values.compact
     end
 
     def in_parallel(tables, &block)
@@ -646,7 +646,7 @@ Options:}
 
         tables.keys.each do |table|
           unless table_exists?(conn, table, from_schema)
-            abort "Table does not exist in source: #{table}"
+            abort "Table does not exist in source: #{from_schema}.#{table}"
           end
         end
       end
