@@ -95,7 +95,7 @@ module PgSync
 
         tables = table_list(args, opts, from_uri, from_schema)
 
-        psql_version = Gem::Version.new(`psql --version`.lines[0].chomp.split(" ")[-1])
+        pgql_version = Gem::Version.new(`psql --version`.lines[0].chomp.split(" ")[-1].split('.pgdg')[0])
         if_exists = psql_version >= Gem::Version.new("9.4.0")
 
         if opts[:schema_only]
