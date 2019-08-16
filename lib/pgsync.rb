@@ -35,7 +35,7 @@ module PgSync
       start_time = Time.now
 
       args, opts = @arguments, @options
-      [:to, :from, :to_safe, :exclude].each do |opt|
+      [:to, :from, :to_safe, :exclude, :preserve].each do |opt|
         opts[opt] ||= config[opt.to_s]
       end
       command = args[0]
@@ -191,6 +191,9 @@ module PgSync
                 end
 
                 copy_to_command = "COPY (SELECT #{copy_fields} FROM #{from_schema}.#{table}#{sql_clause}) TO STDOUT"
+                if opts[:preserve] && opts[:preserve].is_a?(Array)
+                   opts[:preserve] = opts[:preserve].include?(table)
+                end
                 if opts[:in_batches]
                   primary_key = self.primary_key(from_connection, table, from_schema)
                   abort "No primary key" unless primary_key
