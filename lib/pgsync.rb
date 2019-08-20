@@ -163,6 +163,12 @@ module PgSync
               extra_sequences = to_sequences - from_sequences
               missing_sequences = from_sequences - to_sequences
 
+              if opts[:preserve] && opts[:preserve].is_a?(Array)
+                opts[:preserve] = opts[:preserve].include?(table)
+              end
+
+              log "    Will preserve #{from_schema}.#{table}" if opts[:preserve]
+
               sql_clause = String.new
 
               @mutex.synchronize do
@@ -191,12 +197,10 @@ module PgSync
                 end
 
                 copy_to_command = "COPY (SELECT #{copy_fields} FROM #{from_schema}.#{table}#{sql_clause}) TO STDOUT"
-                if opts[:preserve] && opts[:preserve].is_a?(Array)
-                   opts[:preserve] = opts[:preserve].include?(table)
-                end
+
                 if opts[:in_batches]
                   primary_key = self.primary_key(from_connection, table, from_schema)
-                  abort "No primary key" unless primary_key
+                  abort "No primary key in #{from_schema}.#{table}" unless primary_key
 
                   from_max_id = max_id(from_connection, table, primary_key, sql_clause)
                   to_max_id = max_id(to_connection, table, primary_key, sql_clause) + 1
@@ -237,7 +241,7 @@ module PgSync
                   end
                 elsif !opts[:truncate] && (opts[:overwrite] || opts[:preserve] || !sql_clause.empty?)
                   primary_key = self.primary_key(to_connection, table, to_schema)
-                  abort "No primary key" unless primary_key
+                  abort "No primary key in #{to_schema}.#{table}" unless primary_key
 
                   temp_table = "pgsync_#{rand(1_000_000_000)}"
                   file = Tempfile.new(temp_table)
