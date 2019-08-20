@@ -200,7 +200,8 @@ module PgSync
 
                 if opts[:in_batches]
                   primary_key = self.primary_key(from_connection, table, from_schema)
-                  abort "No primary key in #{from_schema}.#{table}" unless primary_key
+                  primary_key ||= self.typical_primary_key(to_connection, table, to_schema)
+                  abort "No primary key in #{from_schema}.#{table} (FROM)" unless primary_key
 
                   from_max_id = max_id(from_connection, table, primary_key, sql_clause)
                   to_max_id = max_id(to_connection, table, primary_key, sql_clause) + 1
@@ -241,7 +242,8 @@ module PgSync
                   end
                 elsif !opts[:truncate] && (opts[:overwrite] || opts[:preserve] || !sql_clause.empty?)
                   primary_key = self.primary_key(to_connection, table, to_schema)
-                  abort "No primary key in #{to_schema}.#{table}" unless primary_key
+                  primary_key ||= self.typical_primary_key(to_connection, table, to_schema)
+                  abort "No primary key in #{to_schema}.#{table} (TO)" unless primary_key
 
                   temp_table = "pgsync_#{rand(1_000_000_000)}"
                   file = Tempfile.new(temp_table)
@@ -432,6 +434,7 @@ Options:}
     end
 
     # http://stackoverflow.com/a/20537829
+    # if used after --pre-data sync will return nothing due to meta field data missing
     def primary_key(conn, table, schema)
       query = <<-SQL
         SELECT
@@ -451,6 +454,18 @@ Options:}
       row = conn.exec_params(query, [schema, table]).to_a[0]
       row && row["attname"]
     end
+
+    def typical_primary_key(conn, table, schema)
+      log "Fallback to typical primary key for #{schema}.#{table}"
+      query = <<-SQL
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = $1 AND table_name = $2 AND column_name IN ('id', 'code');
+      SQL
+      row = conn.exec_params(query, [schema, table]).to_a[0]
+      row && row["column_name"]
+    end
+
 
     # TODO better performance
     def rule_match?(table, column, rule)
