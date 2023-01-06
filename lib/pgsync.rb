@@ -107,12 +107,12 @@ module PgSync
           log_completed(start_time)
         elsif opts[:pre_data]
           log "* Dumping pre-data schema"
-          dump_command = "pg_dump -Fc --verbose --section=pre-data --no-owner --no-acl #{to_url(source_uri)}"
+          dump_command = "pg_dump -Fc --verbose --section=pre-data --no-owner --no-acl #{tables} #{to_url(source_uri)}"
           restore_command = "pg_restore --verbose --no-owner --no-acl --clean #{if_exists ? "--if-exists" : nil} -d #{to_url(destination_uri)}"
           system("#{dump_command} | #{restore_command}")
         elsif opts[:post_data]
           log "* Dumping post-data schema"
-          dump_command = "pg_dump -Fc --verbose --section=post-data --no-owner --no-acl #{to_url(source_uri)}"
+          dump_command = "pg_dump -Fc --verbose --section=post-data --no-owner --no-acl #{tables} #{to_url(source_uri)}"
           restore_command = "pg_restore --verbose --no-owner --no-acl --clean #{if_exists ? "--if-exists" : nil} -d #{to_url(destination_uri)}"
           system("#{dump_command} | #{restore_command}")
         else
